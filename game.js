@@ -3,8 +3,11 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 // Define the size of the grid and cells
-const gridSize = 20; // 20x20 grid cells
-const cellSize = 40; // Each cell is 40x40 pixels
+const CONFIG = {
+    GRID_SIZE: 20,
+    CELL_SIZE: 40,
+    TRAIN_SPEED: 500,
+};
 
 // Define directions for edges
 const directions = {
@@ -15,8 +18,8 @@ const directions = {
 };
 
 // Initialize a 2D array to represent the grid as nodes
-const grid = Array.from({ length: gridSize }, () =>
-    Array.from({ length: gridSize }, () => ({
+const grid = Array.from({ length: CONFIG.GRID_SIZE }, () =>
+    Array.from({ length: CONFIG.GRID_SIZE }, () => ({
         connections: { top: false, right: false, bottom: false, left: false },
         hasTrack: false // Indicates if the cell has a track
     }))
@@ -32,8 +35,8 @@ let isTrainMoving = false;
 let trainInterval;
 
 // Add a new 2D array to represent the train's path
-const trainPath = Array.from({ length: gridSize }, () =>
-    Array.from({ length: gridSize }, () => false)
+const trainPath = Array.from({ length: CONFIG.GRID_SIZE }, () =>
+    Array.from({ length: CONFIG.GRID_SIZE }, () => false)
 );
 
 // Add new variables for start and destination
@@ -42,88 +45,43 @@ let trainDestination = null;
 
 // Function to draw the train
 function drawTrain() {
-    const x = trainPosition.col * cellSize;
-    const y = trainPosition.row * cellSize;
+    const x = trainPosition.col * CONFIG.CELL_SIZE;
+    const y = trainPosition.row * CONFIG.CELL_SIZE;
     ctx.fillStyle = 'red';
-    ctx.fillRect(x + 10, y + 10, cellSize - 20, cellSize - 20);
-}
-
-// Function to move the train
-function moveTrain() {
-    const currentCell = grid[trainPosition.row][trainPosition.col];
-    const nextPosition = getNextPosition(trainPosition, trainDirection);
-
-    if (isValidMove(nextPosition, currentCell)) {
-        trainPath[trainPosition.row][trainPosition.col] = true; // Mark the current position
-        trainPosition = nextPosition;
-        trainDirection = getNextDirection(grid[nextPosition.row][nextPosition.col], trainDirection);
-    } else {
-        stopTrain();
-    }
-}
-
-// Helper function to get the next position
-function getNextPosition(position, direction) {
-    switch (direction) {
-        case directions.TOP: return { row: position.row - 1, col: position.col };
-        case directions.RIGHT: return { row: position.row, col: position.col + 1 };
-        case directions.BOTTOM: return { row: position.row + 1, col: position.col };
-        case directions.LEFT: return { row: position.row, col: position.col - 1 };
-    }
-}
-
-// Helper function to check if the move is valid
-function isValidMove(position, currentCell) {
-    if (position.row < 0 || position.row >= gridSize || position.col < 0 || position.col >= gridSize) {
-        return false;
-    }
-    return currentCell.connections[trainDirection] && grid[position.row][position.col].hasTrack;
-}
-
-// Helper function to get the next direction
-function getNextDirection(cell, currentDirection) {
-    const oppositeDirection = {
-        [directions.TOP]: directions.BOTTOM,
-        [directions.RIGHT]: directions.LEFT,
-        [directions.BOTTOM]: directions.TOP,
-        [directions.LEFT]: directions.RIGHT
-    };
-
-    // Find all possible directions excluding the opposite of the current direction
-    const possibleDirections = Object.keys(cell.connections).filter(direction => 
-        cell.connections[direction] && direction !== oppositeDirection[currentDirection]
-    );
-
-    // If there are multiple possible directions, choose one randomly
-    if (possibleDirections.length > 0) {
-        return possibleDirections[Math.floor(Math.random() * possibleDirections.length)];
-    }
-
-    // If no other direction is possible, continue in the current direction if it's valid
-    return cell.connections[currentDirection] ? currentDirection : null;
+    ctx.fillRect(x + 10, y + 10, CONFIG.CELL_SIZE - 20, CONFIG.CELL_SIZE - 20);
 }
 
 // Function to start the train
 function startTrain() {
-    if (!isTrainMoving && trainStart) {
+    if (!isTrainMoving && trainStart && trainDestination) {
         // Reset the trainPath
-        for (let row = 0; row < gridSize; row++) {
-            for (let col = 0; col < gridSize; col++) {
+        for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+            for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
                 trainPath[row][col] = false;
             }
         }
-        trainPosition = { ...trainStart };
-        trainDirection = getInitialDirection(grid[trainStart.row][trainStart.col]);
-        isTrainMoving = true;
-        trainInterval = setInterval(() => {
-            moveTrain();
-            drawGrid();
-            if (trainPosition.row === trainDestination.row && trainPosition.col === trainDestination.col) {
-                stopTrain();
-            }
-        }, 500); // Move every 500ms
-    } else if (!trainStart) {
-        console.log("Please set a start position for the train.");
+
+        const path = findPath(trainStart, trainDestination);
+        if (path) {
+            trainPosition = { ...trainStart };
+            isTrainMoving = true;
+            let pathIndex = 0;
+
+            trainInterval = setInterval(() => {
+                if (pathIndex < path.length) {
+                    trainPath[trainPosition.row][trainPosition.col] = true;
+                    trainPosition = path[pathIndex];
+                    pathIndex++;
+                    drawGrid();
+                } else {
+                    stopTrain();
+                }
+            }, CONFIG.TRAIN_SPEED); // Move every 500ms
+        } else {
+            console.log("No valid path found.");
+        }
+    } else if (!trainStart || !trainDestination) {
+        console.log("Please set both start and destination positions for the train.");
     }
 }
 
@@ -135,10 +93,51 @@ function stopTrain() {
     }
 }
 
+// Function to find path using BFS
+function findPath(start, end) {
+    const queue = [[start]];
+    const visited = new Set();
+
+    while (queue.length > 0) {
+        const path = queue.shift();
+        const { row, col } = path[path.length - 1];
+
+        if (row === end.row && col === end.col) {
+            return path;
+        }
+
+        const key = `${row},${col}`;
+        if (!visited.has(key)) {
+            visited.add(key);
+
+            const neighbors = getValidNeighbors(row, col);
+            for (const neighbor of neighbors) {
+                const newPath = [...path, neighbor];
+                queue.push(newPath);
+            }
+        }
+    }
+
+    return null; // No path found
+}
+
+// Function to get valid neighboring cells
+function getValidNeighbors(row, col) {
+    const neighbors = [];
+    const cell = grid[row][col];
+
+    if (cell.connections.top && row > 0) neighbors.push({ row: row - 1, col });
+    if (cell.connections.right && col < CONFIG.GRID_SIZE - 1) neighbors.push({ row, col: col + 1 });
+    if (cell.connections.bottom && row < CONFIG.GRID_SIZE - 1) neighbors.push({ row: row + 1, col });
+    if (cell.connections.left && col > 0) neighbors.push({ row, col: col - 1 });
+
+    return neighbors;
+}
+
 // Function to find a valid starting position for the train
 function findValidStartPosition() {
-    for (let row = 0; row < gridSize; row++) {
-        for (let col = 0; col < gridSize; col++) {
+    for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+        for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
             if (grid[row][col].hasTrack) {
                 return { row, col };
             }
@@ -157,17 +156,17 @@ function getInitialDirection(cell) {
 function drawGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the canvas
 
-    for (let row = 0; row < gridSize; row++) {
-        for (let col = 0; col < gridSize; col++) {
+    for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+        for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
             // Highlight the current cell
             if (highlightedCell.row === row && highlightedCell.col === col) {
                 ctx.fillStyle = 'lightgrey';
-                ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                ctx.fillRect(col * CONFIG.CELL_SIZE, row * CONFIG.CELL_SIZE, CONFIG.CELL_SIZE, CONFIG.CELL_SIZE);
             }
 
             // Draw each cell as a rectangle
             ctx.strokeStyle = 'gray';
-            ctx.strokeRect(col * cellSize, row * cellSize, cellSize, cellSize);
+            ctx.strokeRect(col * CONFIG.CELL_SIZE, row * CONFIG.CELL_SIZE, CONFIG.CELL_SIZE, CONFIG.CELL_SIZE);
         }
     }
     drawTrainPath(); // Draw the train's path
@@ -183,17 +182,17 @@ function drawGrid() {
 function drawStartAndDestination() {
     if (trainStart) {
         ctx.fillStyle = 'yellow';
-        ctx.fillRect(trainStart.col * cellSize, trainStart.row * cellSize, cellSize, cellSize);
+        ctx.fillRect(trainStart.col * CONFIG.CELL_SIZE, trainStart.row * CONFIG.CELL_SIZE, CONFIG.CELL_SIZE, CONFIG.CELL_SIZE);
     }
     if (trainDestination) {
         ctx.fillStyle = 'green';
-        ctx.fillRect(trainDestination.col * cellSize, trainDestination.row * cellSize, cellSize, cellSize);
+        ctx.fillRect(trainDestination.col * CONFIG.CELL_SIZE, trainDestination.row * CONFIG.CELL_SIZE, CONFIG.CELL_SIZE, CONFIG.CELL_SIZE);
     }
 }
 
 // New function to draw the position display
 function drawPositionDisplay() {
-    const displayX = gridSize * cellSize + 10; // 10 pixels padding from the grid
+    const displayX = CONFIG.GRID_SIZE * CONFIG.CELL_SIZE + 10; // 10 pixels padding from the grid
     const displayY = 10; // 10 pixels from the top
     const displayWidth = 80; // Width of the display area
     const displayHeight = 60; // Height of the display area
@@ -217,15 +216,15 @@ function drawPositionDisplay() {
 // Function to convert canvas coordinates to grid coordinates
 function getGridPosition(x, y) {
     return {
-        row: Math.floor(y / cellSize),
-        col: Math.floor(x / cellSize)
+        row: Math.floor(y / CONFIG.CELL_SIZE),
+        col: Math.floor(x / CONFIG.CELL_SIZE)
     };
 }
 
 // Function to add a track and update connections automatically
 function addTrack(row, col) {
     // Check bounds
-    if (row < 0 || row >= gridSize || col < 0 || col >= gridSize) return;
+    if (row < 0 || row >= CONFIG.GRID_SIZE || col < 0 || col >= CONFIG.GRID_SIZE) return;
 
     const node = grid[row][col];
 
@@ -251,13 +250,13 @@ function updateConnections(row, col) {
     }
 
     // Check and connect with right neighbor
-    if (col < gridSize - 1 && grid[row][col + 1].hasTrack) {
+    if (col < CONFIG.GRID_SIZE - 1 && grid[row][col + 1].hasTrack) {
         node.connections.right = true;
         grid[row][col + 1].connections.left = true;
     }
 
     // Check and connect with bottom neighbor
-    if (row < gridSize - 1 && grid[row + 1][col].hasTrack) {
+    if (row < CONFIG.GRID_SIZE - 1 && grid[row + 1][col].hasTrack) {
         node.connections.bottom = true;
         grid[row + 1][col].connections.top = true;
     }
@@ -271,52 +270,54 @@ function updateConnections(row, col) {
 
 // Function to draw tracks on the grid based on connections
 function drawTracks() {
-    for (let row = 0; row < gridSize; row++) {
-        for (let col = 0; col < gridSize; col++) {
-            const { connections, hasTrack } = grid[row][col];
-            if (hasTrack) {
-                ctx.strokeStyle = 'black';
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-
-                // Draw based on connections
-                if (connections.top) {
-                    ctx.moveTo(col * cellSize + cellSize / 2, row * cellSize);
-                    ctx.lineTo(col * cellSize + cellSize / 2, row * cellSize + cellSize / 2);
-                }
-                if (connections.right) {
-                    ctx.moveTo(col * cellSize + cellSize / 2, row * cellSize + cellSize / 2);
-                    ctx.lineTo(col * cellSize + cellSize, row * cellSize + cellSize / 2);
-                }
-                if (connections.bottom) {
-                    ctx.moveTo(col * cellSize + cellSize / 2, row * cellSize + cellSize / 2);
-                    ctx.lineTo(col * cellSize + cellSize / 2, row * cellSize + cellSize);
-                }
-                if (connections.left) {
-                    ctx.moveTo(col * cellSize, row * cellSize + cellSize / 2);
-                    ctx.lineTo(col * cellSize + cellSize / 2, row * cellSize + cellSize / 2);
-                }
-
-                ctx.stroke();
+    for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+        for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
+            if (grid[row][col].hasTrack) {
+                drawTrackForCell(row, col);
             }
         }
     }
 }
 
+function drawTrackForCell(row, col) {
+    const { connections } = grid[row][col];
+    const centerX = col * CONFIG.CELL_SIZE + CONFIG.CELL_SIZE / 2;
+    const centerY = row * CONFIG.CELL_SIZE + CONFIG.CELL_SIZE / 2;
+
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+
+    if (connections.top) drawLine(centerX, centerY, centerX, row * CONFIG.CELL_SIZE);
+    if (connections.right) drawLine(centerX, centerY, (col + 1) * CONFIG.CELL_SIZE, centerY);
+    if (connections.bottom) drawLine(centerX, centerY, centerX, (row + 1) * CONFIG.CELL_SIZE);
+    if (connections.left) drawLine(centerX, centerY, col * CONFIG.CELL_SIZE, centerY);
+
+    ctx.stroke();
+}
+
+function drawLine(x1, y1, x2, y2) {
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+}
+
 // Add a new function to draw the train's path
 function drawTrainPath() {
     ctx.fillStyle = 'rgba(0, 255, 0, 0.3)'; // Semi-transparent green
-    for (let row = 0; row < gridSize; row++) {
-        for (let col = 0; col < gridSize; col++) {
+    for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+        for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
             if (trainPath[row][col]) {
-                ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                ctx.fillRect(col * CONFIG.CELL_SIZE, row * CONFIG.CELL_SIZE, CONFIG.CELL_SIZE, CONFIG.CELL_SIZE);
             }
         }
     }
 }
 
 // Handle mouse clicks on the canvas
-canvas.addEventListener('click', (event) => {
+canvas.addEventListener('click', handleCanvasClick);
+canvas.addEventListener('mousemove', handleCanvasMouseMove);
+
+function handleCanvasClick(event) {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -338,10 +339,9 @@ canvas.addEventListener('click', (event) => {
         // Add track
         addTrack(row, col);
     }
-});
+}
 
-// Handle mouse movement over the canvas
-canvas.addEventListener('mousemove', (event) => {
+function handleCanvasMouseMove(event) {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -353,11 +353,19 @@ canvas.addEventListener('mousemove', (event) => {
         drawGrid(); // Redraw the grid to update the highlight
         drawTracks(); // Redraw the tracks on top
     }
-});
+}
 
 // Add event listeners for start and stop buttons
-document.getElementById('startButton').addEventListener('click', startTrain);
-document.getElementById('stopButton').addEventListener('click', stopTrain);
+const eventListeners = {
+    'startButton': { event: 'click', handler: startTrain },
+    'stopButton': { event: 'click', handler: stopTrain },
+    'randomTrackButton': { event: 'click', handler: generateComplexTrack },
+    // ...
+};
+
+Object.entries(eventListeners).forEach(([id, { event, handler }]) => {
+    document.getElementById(id).addEventListener(event, handler);
+});
 
 // Add a new keydown event listener
 document.addEventListener('keydown', (event) => {
@@ -375,7 +383,92 @@ document.addEventListener('keydown', (event) => {
 });
 
 // Adjust canvas size to accommodate the position display
-canvas.width = gridSize * cellSize + 100; // Add 100 pixels for the display area
+canvas.width = CONFIG.GRID_SIZE * CONFIG.CELL_SIZE + 100; // Add 100 pixels for the display area
+
+// Add this new function to generate a complex random track
+function generateComplexTrack() {
+    // Clear existing track
+    for (let row = 0; row < CONFIG.GRID_SIZE; row++) {
+        for (let col = 0; col < CONFIG.GRID_SIZE; col++) {
+            grid[row][col].hasTrack = false;
+            grid[row][col].connections = { top: false, right: false, bottom: false, left: false };
+        }
+    }
+
+    // Start from a random position
+    let currentPosition = {
+        row: Math.floor(Math.random() * CONFIG.GRID_SIZE),
+        col: Math.floor(Math.random() * CONFIG.GRID_SIZE)
+    };
+    trainStart = { ...currentPosition };
+
+    let visited = new Set();
+    let stack = [currentPosition];
+    let trackLength = 0;
+    const maxTrackLength = Math.floor(CONFIG.GRID_SIZE * CONFIG.GRID_SIZE * 0.3); // 30% of grid size
+
+    while (stack.length > 0 && trackLength < maxTrackLength) {
+        currentPosition = stack.pop();
+        const key = `${currentPosition.row},${currentPosition.col}`;
+
+        if (!visited.has(key)) {
+            visited.add(key);
+            addTrack(currentPosition.row, currentPosition.col);
+            trackLength++;
+
+            // Get all possible directions
+            let possibleMoves = [
+                { row: -1, col: 0 }, // up
+                { row: 1, col: 0 },  // down
+                { row: 0, col: -1 }, // left
+                { row: 0, col: 1 }   // right
+            ];
+
+            // Shuffle possibleMoves for randomness
+            possibleMoves.sort(() => Math.random() - 0.5);
+
+            for (const move of possibleMoves) {
+                const newRow = currentPosition.row + move.row;
+                const newCol = currentPosition.col + move.col;
+
+                if (newRow >= 0 && newRow < CONFIG.GRID_SIZE && newCol >= 0 && newCol < CONFIG.GRID_SIZE && !grid[newRow][newCol].hasTrack) {
+                    stack.push({ row: newRow, col: newCol });
+                }
+            }
+        }
+    }
+
+    trainDestination = { ...currentPosition };
+    drawGrid();
+}
 
 // Call drawGrid to render the initial grid
 drawGrid();
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function update() {
+    // Update game state
+}
+
+function render() {
+    // Render game elements
+}
+
+requestAnimationFrame(gameLoop);
+
+function handleError(error, context) {
+    console.error(`Error in ${context}:`, error);
+    // Potentially show user-friendly error message
+}
+
+// Usage
+try {
+    // Risky operation
+} catch (error) {
+    handleError(error, 'generateComplexTrack');
+}
